@@ -20,6 +20,7 @@ services:
     volumes:
       - ${REALDEBRID_MOUNT_PARENT_PATH:-/dev/null}:${REALDEBRID_MOUNT_PARENT_PATH:-/dev/null}:rslave
       - ${TORBOX_MOUNT_PARENT_PATH:-/dev/null}:${TORBOX_MOUNT_PARENT_PATH:-/dev/null}:rslave
+      - ${ALLDEBRID_MOUNT_PARENT_PATH:-/dev/null}:${ALLDEBRID_MOUNT_PARENT_PATH:-/dev/null}:rslave
       - ${SONARR_ROOT_FOLDER}:${SONARR_ROOT_FOLDER}
       - ${RADARR_ROOT_FOLDER}:${RADARR_ROOT_FOLDER}
     profiles: [repair, repair_all, all]
@@ -35,6 +36,7 @@ services:
     volumes:
       - ${REALDEBRID_MOUNT_PARENT_PATH:-/dev/null}:${REALDEBRID_MOUNT_PARENT_PATH:-/dev/null}:rslave
       - ${TORBOX_MOUNT_PARENT_PATH:-/dev/null}:${TORBOX_MOUNT_PARENT_PATH:-/dev/null}:rslave
+      - ${ALLDEBRID_MOUNT_PARENT_PATH:-/dev/null}:${ALLDEBRID_MOUNT_PARENT_PATH:-/dev/null}:rslave
       - ${SONARR_ROOT_FOLDER_4K}:${SONARR_ROOT_FOLDER}
       - ${RADARR_ROOT_FOLDER_4K}:${RADARR_ROOT_FOLDER}
     profiles: [repair_4k, repair_all, all]
@@ -50,6 +52,7 @@ services:
     volumes:
       - ${REALDEBRID_MOUNT_PARENT_PATH:-/dev/null}:${REALDEBRID_MOUNT_PARENT_PATH:-/dev/null}:rslave
       - ${TORBOX_MOUNT_PARENT_PATH:-/dev/null}:${TORBOX_MOUNT_PARENT_PATH:-/dev/null}:rslave
+      - ${ALLDEBRID_MOUNT_PARENT_PATH:-/dev/null}:${ALLDEBRID_MOUNT_PARENT_PATH:-/dev/null}:rslave
       - ${SONARR_ROOT_FOLDER_ANIME}:${SONARR_ROOT_FOLDER}
       - ${RADARR_ROOT_FOLDER_ANIME}:${RADARR_ROOT_FOLDER}
     profiles: [repair_anime, repair_all, all]
@@ -65,6 +68,7 @@ services:
     volumes:
       - ${REALDEBRID_MOUNT_PARENT_PATH:-/dev/null}:${REALDEBRID_MOUNT_PARENT_PATH:-/dev/null}:rslave
       - ${TORBOX_MOUNT_PARENT_PATH:-/dev/null}:${TORBOX_MOUNT_PARENT_PATH:-/dev/null}:rslave
+      - ${ALLDEBRID_MOUNT_PARENT_PATH:-/dev/null}:${ALLDEBRID_MOUNT_PARENT_PATH:-/dev/null}:rslave
       - ${SONARR_ROOT_FOLDER_MUX}:${SONARR_ROOT_FOLDER}
       - ${RADARR_ROOT_FOLDER_MUX}:${RADARR_ROOT_FOLDER}
     profiles: [repair_mux, repair_all, all]

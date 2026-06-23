@@ -8,11 +8,11 @@ from urllib.parse import urljoin
 from datetime import datetime
 from shared.discord import discordUpdate
 from shared.requests import retryRequest
-from shared.shared import realdebrid, torbox, mediaExtensions, checkRequiredEnvs
+from shared.shared import realdebrid, torbox, alldebrid, mediaExtensions, checkRequiredEnvs
 
 def validateDebridEnabled():
-    if not realdebrid['enabled'] and not torbox['enabled']:
-        return False, "At least one of RealDebrid or Torbox must be enabled."
+    if not realdebrid['enabled'] and not torbox['enabled'] and not alldebrid['enabled']:
+        return False, "At least one of RealDebrid, Torbox, or AllDebrid must be enabled."
     return True
 
 def validateRealdebridHost():
@@ -75,8 +75,48 @@ def validateTorboxMountTorrentsPath():
     else:
         return False, "Path does not exist or has no children."
 
+def validateAlldebridHost():
+    # /v4/ping is a public endpoint — no auth needed
+    url = urljoin(alldebrid['host'], "v4/ping")
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('status') == 'success'
+        return False
+    except Exception as e:
+        return False
+
+def validateAlldebridApiKey():
+    url = urljoin(alldebrid['host'], "v4/user")
+    headers = {'Authorization': f'Bearer {alldebrid["apiKey"]}'}
+    try:
+        response = requests.get(url, headers=headers)
+        data = response.json()
+
+        if data.get('status') == 'error':
+            error_code = data.get('error', {}).get('code', '')
+            if error_code in ('AUTH_BAD_APIKEY', 'AUTH_MISSING_APIKEY'):
+                return False, "Invalid or missing API key."
+            elif error_code == 'AUTH_BLOCKED':
+                return False, "API key is geo-blocked or IP-blocked."
+            elif error_code == 'AUTH_USER_BANNED':
+                return False, "Account is banned."
+            return False, data.get('error', {}).get('message', 'Unknown error.')
+    except Exception as e:
+        return False
+
+    return True
+
+def validateAlldebridMountTorrentsPath():
+    path = alldebrid['mountTorrentsPath']
+    if os.path.exists(path) and any(os.path.isdir(os.path.join(path, child)) for child in os.listdir(path)):
+        return True
+    else:
+        return False, "Path does not exist or has no children."
+
 requiredEnvs = {
-    'RealDebrid/TorBox enabled': (True, validateDebridEnabled),
+    'RealDebrid/TorBox/AllDebrid enabled': (True, validateDebridEnabled),
 }
 
 if realdebrid['enabled']:
@@ -91,6 +131,13 @@ if torbox['enabled']:
         'Torbox host': (torbox['host'], validateTorboxHost),
         'Torbox API key': (torbox['apiKey'], validateTorboxApiKey, True),
         'Torbox mount torrents path': (torbox['mountTorrentsPath'], validateTorboxMountTorrentsPath)
+    })
+
+if alldebrid['enabled']:
+    requiredEnvs.update({
+        'AllDebrid host': (alldebrid['host'], validateAlldebridHost),
+        'AllDebrid API key': (alldebrid['apiKey'], validateAlldebridApiKey, True),
+        'AllDebrid mount torrents path': (alldebrid['mountTorrentsPath'], validateAlldebridMountTorrentsPath)
     })
 
 checkRequiredEnvs(requiredEnvs)
@@ -461,6 +508,178 @@ class Torbox(TorrentBase):
             return self.STATUS_ERROR
         return status
 
+
+class AllDebrid(TorrentBase):
+    """
+    AllDebrid debrid service integration.
+
+    Notable API differences vs RealDebrid/Torbox:
+      - Instant availability (cache status) is returned in the upload response
+        itself via a `ready` boolean, rather than a separate pre-check endpoint.
+        We therefore upload first, read `ready`, and delete if not cached when
+        failIfNotCached is True.
+      - File selection does not exist; AllDebrid always serves the full torrent.
+      - Status is polled via POST /v4.1/magnet/status with the magnet `id`.
+      - Deletion uses POST /v4/magnet/delete (not DELETE).
+    """
+
+    def __init__(self, f, fileData, file, failIfNotCached, onlyLargestFile) -> None:
+        super().__init__(f, fileData, file, failIfNotCached, onlyLargestFile)
+        self.headers = {'Authorization': f'Bearer {alldebrid["apiKey"]}'}
+        self.mountTorrentsPath = alldebrid["mountTorrentsPath"]
+
+    def submitTorrent(self):
+        # Upload the torrent/magnet first; the `ready` field in the response
+        # tells us whether it is already cached on AllDebrid's servers.
+        if not self.addTorrent():
+            return False
+
+        self.print('instantAvailability:', not not self._instantAvailability)
+
+        if self.failIfNotCached and not self._instantAvailability:
+            self.delete()
+            return False
+
+        return True
+
+    async def getInfo(self, refresh=False):
+        self._enforceId()
+
+        if refresh or not self._info:
+            infoRequest = retryRequest(
+                lambda: requests.post(
+                    urljoin(alldebrid['host'], "v4.1/magnet/status"),
+                    headers=self.headers,
+                    data={'id': self.id}
+                ),
+                print=self.print
+            )
+            if infoRequest is None:
+                self._info = None
+            else:
+                response = infoRequest.json()
+                if response.get('status') == 'success':
+                    magnets = response['data'].get('magnets', [])
+                    if magnets:
+                        magnet = magnets[0]
+                        magnet['status'] = self._normalize_status(magnet['statusCode'])
+                        self._info = magnet
+                    else:
+                        self._info = None
+                else:
+                    self._info = None
+
+        return self._info
+
+    async def selectFiles(self):
+        # AllDebrid does not support selective file downloads.
+        pass
+
+    def delete(self):
+        self._enforceId()
+
+        deleteRequest = retryRequest(
+            lambda: requests.post(
+                urljoin(alldebrid['host'], "v4/magnet/delete"),
+                headers=self.headers,
+                data={'id': self.id}
+            ),
+            print=self.print
+        )
+        return not not deleteRequest
+
+    async def getTorrentPath(self):
+        info = await self.getInfo()
+        if not info:
+            return None
+
+        filename = info.get('filename', '')
+        if not filename:
+            return None
+
+        folderPathMountTorrent = os.path.join(self.mountTorrentsPath, filename)
+
+        if os.path.exists(folderPathMountTorrent) and os.listdir(folderPathMountTorrent):
+            return folderPathMountTorrent
+
+        # Some mount implementations strip common video extensions from folder names
+        folderPathWithoutExt = os.path.join(
+            self.mountTorrentsPath, os.path.splitext(filename)[0]
+        )
+        if (filename.endswith(('.mkv', '.mp4', '.avi', '.mov', '.webm')) and
+                os.path.exists(folderPathWithoutExt) and os.listdir(folderPathWithoutExt)):
+            return folderPathWithoutExt
+
+        return None
+
+    def _addTorrentFile(self):
+        """Upload a .torrent file via multipart form POST."""
+        nametorrent = os.path.basename(self.f.name)
+        files = {'files[]': (nametorrent, self.f)}
+
+        request = retryRequest(
+            lambda: requests.post(
+                urljoin(alldebrid['host'], "v4/magnet/upload/file"),
+                headers=self.headers,
+                files=files
+            ),
+            print=self.print
+        )
+        if request is None:
+            return None
+
+        response = request.json()
+        self.print('response info:', response)
+
+        if response.get('status') != 'success':
+            return None
+
+        fileData = response['data']['files'][0]
+        if 'error' in fileData:
+            self.print('upload error:', fileData['error'])
+            return None
+
+        self._instantAvailability = fileData.get('ready', False)
+        self.id = fileData['id']
+        return self.id
+
+    def _addMagnetFile(self):
+        """Upload a magnet URI via POST."""
+        request = retryRequest(
+            lambda: requests.post(
+                urljoin(alldebrid['host'], "v4/magnet/upload"),
+                headers=self.headers,
+                data={'magnets[]': self.fileData}
+            ),
+            print=self.print
+        )
+        if request is None:
+            return None
+
+        response = request.json()
+        self.print('response info:', response)
+
+        if response.get('status') != 'success':
+            return None
+
+        magnetData = response['data']['magnets'][0]
+        if 'error' in magnetData:
+            self.print('upload error:', magnetData['error'])
+            return None
+
+        self._instantAvailability = magnetData.get('ready', False)
+        self.id = magnetData['id']
+        return self.id
+
+    def _normalize_status(self, statusCode):
+        if statusCode == 4:
+            return self.STATUS_COMPLETED
+        elif 0 <= statusCode <= 3:
+            return self.STATUS_DOWNLOADING
+        else:
+            return self.STATUS_ERROR
+
+
 class Torrent(TorrentBase):
     def getHash(self):
 
@@ -496,4 +715,10 @@ class TorboxTorrent(Torbox, Torrent):
     pass
 
 class TorboxMagnet(Torbox, Magnet):
+    pass
+
+class AllDebridTorrent(AllDebrid, Torrent):
+    pass
+
+class AllDebridMagnet(AllDebrid, Magnet):
     pass

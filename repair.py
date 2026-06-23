@@ -2,10 +2,10 @@ import os
 import argparse
 import time
 import traceback
-from shared.debrid import validateRealdebridMountTorrentsPath, validateTorboxMountTorrentsPath
+from shared.debrid import validateRealdebridMountTorrentsPath, validateTorboxMountTorrentsPath, validateAlldebridMountTorrentsPath
 from shared.arr import Sonarr, Radarr
 from shared.discord import discordUpdate, discordError
-from shared.shared import repair, realdebrid, torbox, intersperse, ensureTuple
+from shared.shared import repair, realdebrid, torbox, alldebrid, intersperse, ensureTuple
 from datetime import datetime
 
 def parseInterval(intervalStr):
@@ -57,8 +57,8 @@ except Exception as e:
 
 def main():
     if unsafe():
-        print("One or both debrid services are not working properly. Skipping repair.")
-        discordError(f"[{args.mode}] One or both debrid services are not working properly. Skipping repair.")
+        print("One or more debrid services are not working properly. Skipping repair.")
+        discordError(f"[{args.mode}] One or more debrid services are not working properly. Skipping repair.")
         return
     
     print("Collecting media...")
@@ -71,8 +71,8 @@ def main():
     for arr, media in intersperse(sonarrMedia, radarrMedia):
         try:
             if unsafe():
-                print("One or both debrid services are not working properly. Skipping repair.")
-                discordError(f"[{args.mode}] One or both debrid services are not working properly. Skipping repair.")
+                print("One or more debrid services are not working properly. Skipping repair.")
+                discordError(f"[{args.mode}] One or more debrid services are not working properly. Skipping repair.")
                 return 
 
             getItems = lambda media, childId: arr.getFiles(media=media, childId=childId) if args.mode == 'symlink' else arr.getHistory(media=media, childId=childId, includeGrandchildDetails=True)
@@ -88,7 +88,8 @@ def main():
                         if os.path.islink(fullPath):
                             destinationPath = os.readlink(fullPath)
                             if ((realdebrid['enabled'] and destinationPath.startswith(realdebrid['mountTorrentsPath']) and not os.path.exists(destinationPath)) or 
-                               (torbox['enabled'] and destinationPath.startswith(torbox['mountTorrentsPath']) and not os.path.exists(destinationPath))):
+                               (torbox['enabled'] and destinationPath.startswith(torbox['mountTorrentsPath']) and not os.path.exists(destinationPath)) or
+                               (alldebrid['enabled'] and destinationPath.startswith(alldebrid['mountTorrentsPath']) and not os.path.exists(destinationPath))):
                                 brokenItems.append(os.path.realpath(fullPath))
                     else:  # file mode
                         if item.reason == 'MissingFromDisk' and item.parentId not in media.fullyAvailableChildrenIds:
@@ -151,7 +152,8 @@ def main():
 def unsafe():
     return (args.mode == 'symlink' and 
         ((realdebrid['enabled'] and not ensureTuple(validateRealdebridMountTorrentsPath())[0]) or 
-        (torbox['enabled'] and not ensureTuple(validateTorboxMountTorrentsPath())[0])))
+        (torbox['enabled'] and not ensureTuple(validateTorboxMountTorrentsPath())[0]) or
+        (alldebrid['enabled'] and not ensureTuple(validateAlldebridMountTorrentsPath())[0])))
 
 if runIntervalSeconds > 0:
     while True:

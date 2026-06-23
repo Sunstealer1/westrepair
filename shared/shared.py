@@ -87,6 +87,13 @@ torbox = {
     'mountTorrentsPath': env.string('TORBOX_MOUNT_TORRENTS_PATH', default=None)
 }
 
+alldebrid = {
+    'enabled': env.bool('ALLDEBRID_ENABLED', default=None),
+    'host': env.string('ALLDEBRID_HOST', default=None),
+    'apiKey': env.string('ALLDEBRID_API_KEY', default=None),
+    'mountTorrentsPath': env.string('ALLDEBRID_MOUNT_TORRENTS_PATH', default=None)
+}
+
 trakt = {
     'apiKey': env.string('TRAKT_API_KEY', default=None)
 }
